@@ -1,0 +1,11 @@
+/target
+*.log
+*.properties
+*.yaml
+*.yml
+*.json
+*.xml
+*.ini
+Cargo.lock
+*.md
+/*.rs
