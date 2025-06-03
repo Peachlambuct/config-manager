@@ -1,6 +1,9 @@
 use crate::error::ConfigError;
 use serde_json::Number;
 use std::{collections::HashMap, fmt::Display};
+extern crate colored; // not needed in Rust 2018+
+
+use colored::{Color, Colorize};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConfigType {
@@ -80,7 +83,7 @@ impl Config {
     }
 
     pub fn show(&self, path: &str) {
-        println!("📄 配置文件: {} ({}格式)", path, self.config_type);
+        println!("📄 配置文件: {} ({}格式)", path.blue(), self.config_type.to_string().color(Color::Yellow));
         println!("📊 配置项数量: {}\n", self.config.len());
         println!("🔧 配置内容:");
         
@@ -98,27 +101,27 @@ impl Config {
         
         match value {
             ConfigValue::String(s) => {
-                println!("{}{}: \"{}\" (String)", prefix, key, s);
+                println!("{}{}: \"{}\" (String)cls", prefix, key.to_string().blue(), s.to_string().green());
             }
             ConfigValue::Number(n) => {
-                println!("{}{}: {} (Number)", prefix, key, n);
+                println!("{}{}: {} (Number)", prefix, key.to_string().blue(), n.to_string().green());
             }
             ConfigValue::Boolean(b) => {
-                println!("{}{}: {} (Boolean)", prefix, key, b);
+                println!("{}{}: {} (Boolean)", prefix, key.to_string().blue(), b.to_string().purple());
             }
             ConfigValue::Null => {
-                println!("{}{}: null", prefix, key);
+                println!("{}{}: {}", prefix, key.to_string().blue(), "null".red());
             }
             ConfigValue::Array(arr) => {
-                println!("{}{}: (Array[{}])", prefix, key, arr.len());
+                println!("{}{}: (Array[{}])", prefix, key.to_string().blue(), arr.len());
                 for (index, item) in arr.iter().enumerate() {
                     let item_is_last = index == arr.len() - 1;
-                    let item_key = format!("[{}]", index);
+                    let item_key = format!("[{}]", index.to_string().yellow());
                     Self::display_config_value(&item_key, item, indent_level + 1, item_is_last);
                 }
             }
             ConfigValue::Object(obj) => {
-                println!("{}{}: (Object)", prefix, key);
+                println!("{}{}: (Object)", prefix, key.to_string().blue());
                 let obj_keys: Vec<&String> = obj.keys().collect();
                 for (index, obj_key) in obj_keys.iter().enumerate() {
                     let obj_is_last = index == obj_keys.len() - 1;
