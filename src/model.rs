@@ -101,7 +101,7 @@ impl Config {
         
         match value {
             ConfigValue::String(s) => {
-                println!("{}{}: \"{}\" (String)cls", prefix, key.to_string().blue(), s.to_string().green());
+                println!("{}{}: \"{}\" (String)", prefix, key.to_string().blue(), s.to_string().green());
             }
             ConfigValue::Number(n) => {
                 println!("{}{}: {} (Number)", prefix, key.to_string().blue(), n.to_string().green());
