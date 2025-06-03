@@ -11,8 +11,12 @@ pub enum ConfigError {
     InvalidFileExtension,
     #[error("empty path")]
     EmptyPath,
-    #[error("unknown config type")]
+    #[error("unsupported config type, we only support json, yaml, toml")]
     UnknownConfigType,
     #[error("empty content")]
     EmptyContent,
+    #[error("unsupported format")]
+    UnsupportedFormat { format: String },
+    #[error("key not found")]
+    KeyNotFound,
 }

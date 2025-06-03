@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use config_manager::command::{Command, Subcommand};
-use config_manager::handler::handle_validate;
-use config_manager::{delete_ignore_line, init_tracing, read_file};
+use config_manager::handler::{handle_convert, handle_get, handle_show, handle_validate};
+use config_manager::{init_tracing, read_file};
 use tracing::debug;
 
 fn main() -> Result<()> {
@@ -13,15 +13,19 @@ fn main() -> Result<()> {
     match command.subcommand {
         Subcommand::Validate { file } => {
             debug!("validate: {}", file);
-            handle_validate(file)?;
-        }
-        Subcommand::Show { file } => {
-            debug!("show: {}", file);
             let content = read_file(&file)?;
-            debug!("content: \n{}", delete_ignore_line(&content));
+            handle_validate(file, content)?;
+        }
+        Subcommand::Show { file, get } => {
+            if get.is_empty() {
+                handle_show(file)?;
+            } else {
+                handle_get(file, get)?;
+            }
         }
         Subcommand::Convert { input, output } => {
             debug!("convert: {} -> {}", input, output);
+            handle_convert(input, output)?;
         }
     }
     Ok(())

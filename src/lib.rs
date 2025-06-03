@@ -8,7 +8,7 @@ pub mod model;
 
 pub fn init_tracing() {
     let subscriber = fmt::Subscriber::builder()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(tracing::Level::INFO)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)

@@ -14,6 +14,8 @@ pub enum Subcommand {
     #[clap(name = "show")]
     Show {
         file: String,
+        #[clap(short, long, default_value = "")]
+        get: String,
     },
 
     #[clap(name = "convert")]
