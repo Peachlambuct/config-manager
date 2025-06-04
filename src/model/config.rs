@@ -577,3 +577,6 @@ impl PartialOrd<&f64> for ConfigValue {
         }
     }
 }
+
+/// 用于提供serve下的缓存
+pub type ConfigMap = HashMap<String, Config>;

@@ -145,6 +145,31 @@ pub fn handle_convert(input: String, output: String) -> Result<(), ConfigError> 
     Ok(())
 }
 
+pub fn write_env_config(config: Config, config_path: String) -> Result<(), ConfigError> {
+    // 转换为serde_json::Value以避免类型标签
+    let serde_value = config.to_serde_value();
+
+    let converted_content = match config.config_type {
+        ConfigType::Json => {
+            serde_json::to_string_pretty(&serde_value).map_err(|_| ConfigError::ParseConfigError)?
+        }
+        ConfigType::Yaml => {
+            serde_yaml::to_string(&serde_value).map_err(|_| ConfigError::ParseConfigError)?
+        }
+        ConfigType::Toml => {
+            // TOML需要特殊处理，因为它不支持所有JSON类型
+            toml::to_string_pretty(&serde_value).map_err(|_| ConfigError::ParseConfigError)?
+        }
+        ConfigType::Unknown => {
+            return Err(ConfigError::UnknownConfigType);
+        }
+    };
+
+    // 写入目标文件
+    std::fs::write(&config_path, converted_content).map_err(|e| ConfigError::IoError(e))?;
+    Ok(())
+}
+
 pub fn handle_template(template: TemplateType, format: String) -> Result<(), ConfigError> {
     let format = format.trim().to_lowercase();
     if format.is_empty() {
