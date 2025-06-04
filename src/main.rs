@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use clap::Parser;
@@ -20,9 +21,6 @@ use tracing::{debug, info};
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
-    let config_map = ConfigMap::new();
-    let config_map = Arc::new(Mutex::new(config_map));
-
     let command = Command::parse();
 
     match command.subcommand {
@@ -88,27 +86,57 @@ async fn main() -> Result<()> {
                 port, host, config_path
             );
             let app_state = AppState::new(port, host, config_path);
-            info!("check config path: {}", app_state.config_path);
-            if !Path::new(&app_state.config_path).exists() {
+            let app_state = Arc::new(Mutex::new(app_state));
+
+            info!(
+                "check config path: {}",
+                app_state.lock().unwrap().config_path
+            );
+            if !Path::new(&app_state.lock().unwrap().config_path).exists() {
                 info!("config path not found, create it");
-                std::fs::create_dir_all(app_state.config_path.clone())?;
+                std::fs::create_dir_all(app_state.lock().unwrap().config_path.clone())?;
             }
-            info!("load config from path: {}", app_state.config_path);
+            info!(
+                "load config from path: {}",
+                app_state.lock().unwrap().config_path
+            );
+            
+            // 先获取配置路径，避免在循环中持有锁
+            let config_path = app_state.lock().unwrap().config_path.clone();
+            
+            // 收集所有配置文件到临时 HashMap
+            let mut configs_to_load = HashMap::new();
+            
             // 遍历文件夹中的文件
-            for entry in std::fs::read_dir(app_state.config_path.clone())? {
+            for entry in std::fs::read_dir(config_path)? {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file() {
-                    let content = std::fs::read_to_string(path.clone())?;
+                    info!("load config file: {}", path.to_string_lossy().to_string());
+                    let content = read_file(path.to_string_lossy().to_string().as_str())?;
+                    info!("content: {}", content);
                     let config = handle_validate(path.to_string_lossy().to_string(), content)?;
-                    let mut config_map = config_map.lock().unwrap();
-                    config_map.insert(entry.file_name().to_string_lossy().to_string(), config);
+                    info!("config: {:?}", config);
+                    
+                    // 添加到临时 HashMap，不需要获取锁
+                    configs_to_load.insert(entry.file_name().to_string_lossy().to_string(), config);
                 }
             }
+            
+            // 批量插入所有配置，只获取一次锁
+            {
+                let mut app_state_guard = app_state.lock().unwrap();
+                for (key, config) in configs_to_load {
+                    app_state_guard.config_map.insert(key, config);
+                }
+            } // 锁在这里被释放
 
-            info!("config loaded finished: {:?}", config_map);
+            info!(
+                "config loaded finished: {} files",
+                app_state.lock().unwrap().config_map.len()
+            );
 
-            let config_map_cloned = config_map.clone();
+            let app_state_for_watcher = app_state.clone();
             let mut watcher = RecommendedWatcher::new(
                 move |result: notify::Result<Event>| {
                     let event = result.unwrap();
@@ -121,26 +149,30 @@ async fn main() -> Result<()> {
                         debug!("file_name: {:?}", file_name);
                         let content = std::fs::read_to_string(file_path).unwrap();
                         let config = handle_validate(file_name.clone(), content).unwrap();
-                        let mut config_map = config_map_cloned.lock().unwrap();
-                        info!(
-                            "listen config change: {:?}, new config: {:?}",
-                            file_name, config
-                        );
-                        config_map.insert(file_name, config);
-                        drop(config_map);
+                        app_state_for_watcher
+                            .lock()
+                            .unwrap()
+                            .config_map
+                            .insert(file_name, config);
                     }
                 },
                 notify::Config::default(),
             )?;
-            watcher.watch(Path::new(&app_state.config_path), RecursiveMode::Recursive)?;
+            watcher.watch(
+                Path::new(&app_state.lock().unwrap().config_path),
+                RecursiveMode::Recursive,
+            )?;
+            info!("config watcher init finished");
 
-            let listener = TcpListener::bind((app_state.host.clone(), app_state.port)).await?;
+            let host = app_state.lock().unwrap().host.clone();
+            let port = app_state.lock().unwrap().port.clone();
+            let listener = TcpListener::bind((host, port)).await?;
+            info!("server init finished");
             loop {
                 let (stream, _) = listener.accept().await?;
-                let config_map = config_map.clone();
-                let config_path = app_state.config_path.clone();
+                let app_state_cloned = app_state.clone();
                 tokio::spawn(async move {
-                    let _ = handle_client(stream, config_map, config_path).await;
+                    let _ = handle_client(stream, app_state_cloned).await;
                 });
             }
         }
@@ -148,11 +180,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle_client(
-    stream: TcpStream,
-    config_map: Arc<Mutex<ConfigMap>>,
-    config_path: String,
-) -> Result<()> {
+async fn handle_client(stream: TcpStream, app_state: Arc<Mutex<AppState>>) -> Result<()> {
     let mut reader = BufReader::new(stream);
 
     loop {
@@ -177,14 +205,16 @@ async fn handle_client(
                             Ok(content) => match handle_validate(path.clone(), content) {
                                 Ok(mut config) => match config.get_env_override_config() {
                                     Ok(config) => {
-                                        let mut config_map = config_map.lock().unwrap();
-                                        config_map.insert(path.clone(), config.clone());
-                                        drop(config_map); // 明确释放锁
+                                        app_state
+                                            .lock()
+                                            .unwrap()
+                                            .config_map
+                                            .insert(path.clone(), config.clone());
 
                                         // 现在可以安全地使用 await
                                         match write_env_config(
                                             config.clone(),
-                                            Path::new(&config_path)
+                                            Path::new(&app_state.lock().unwrap().config_path)
                                                 .join(&path)
                                                 .to_string_lossy()
                                                 .to_string(),
@@ -192,12 +222,14 @@ async fn handle_client(
                                             Ok(_) => {
                                                 let config_str = serde_json::to_string(&config)
                                                     .unwrap_or_else(|_| {
-                                                        "add config success, but serialize failed".to_string()
+                                                        "add config success, but serialize failed"
+                                                            .to_string()
                                                     });
                                                 response = format!("add result: {}\n", config_str);
                                             }
                                             Err(e) => {
-                                                response = format!("write config file failed: {}\n", e);
+                                                response =
+                                                    format!("write config file failed: {}\n", e);
                                             }
                                         }
                                     }
@@ -216,13 +248,12 @@ async fn handle_client(
                     }
                     Some(CliCommand::Remove { path }) => {
                         debug!("remove: {}", path);
-                        let removed = {
-                            let mut config_map = config_map.lock().unwrap();
-                            config_map.remove(&path).is_some()
-                        }; // MutexGuard 在这里被释放
+                        let removed =
+                            { app_state.lock().unwrap().config_map.remove(&path).is_some() }; // MutexGuard 在这里被释放
 
                         if removed {
-                            let removed_path = Path::new(&config_path).join(path.clone());
+                            let removed_path = Path::new(&app_state.lock().unwrap().config_path)
+                                .join(path.clone());
 
                             // 删除文件
                             match tokio::fs::remove_file(&removed_path).await {
@@ -230,7 +261,10 @@ async fn handle_client(
                                     response = format!("removed config: {}\n", path);
                                 }
                                 Err(e) => {
-                                    response = format!("remove config success, but delete file failed: {}\n", e);
+                                    response = format!(
+                                        "remove config success, but delete file failed: {}\n",
+                                        e
+                                    );
                                 }
                             }
                         } else {
@@ -240,8 +274,7 @@ async fn handle_client(
                     Some(CliCommand::Get { path }) => {
                         debug!("get: {}", path);
                         let config_str = {
-                            let config_map = config_map.lock().unwrap();
-                            match config_map.get(&path) {
+                            match app_state.lock().unwrap().config_map.get(&path) {
                                 Some(config) => match serde_json::to_string(&config) {
                                     Ok(config_str) => Some(config_str),
                                     Err(e) => {
@@ -263,12 +296,11 @@ async fn handle_client(
                     Some(CliCommand::List) => {
                         debug!("list");
                         let list_response = {
-                            let config_map = config_map.lock().unwrap();
-                            if config_map.is_empty() {
+                            if app_state.lock().unwrap().config_map.is_empty() {
                                 "no config file loaded".to_string()
                             } else {
                                 let mut list_response = String::from("loaded config files:\n");
-                                for (key, _) in config_map.iter() {
+                                for (key, _) in app_state.lock().unwrap().config_map.iter() {
                                     list_response.push_str(&format!("  - {} ", key));
                                 }
                                 list_response
@@ -280,9 +312,14 @@ async fn handle_client(
                     Some(CliCommand::Update { old_path, new_path }) => {
                         debug!("update: {} -> {}", old_path, new_path);
                         let update_result = {
-                            let mut config_map = config_map.lock().unwrap();
-                            if let Some(config) = config_map.remove(&old_path) {
-                                config_map.insert(new_path.clone(), config);
+                            if let Some(config) =
+                                app_state.lock().unwrap().config_map.remove(&old_path)
+                            {
+                                app_state
+                                    .lock()
+                                    .unwrap()
+                                    .config_map
+                                    .insert(new_path.clone(), config);
                                 true
                             } else {
                                 false
@@ -290,7 +327,8 @@ async fn handle_client(
                         }; // MutexGuard 在这里被释放
 
                         if update_result {
-                            response = format!("updated config path: {} -> {}\n", old_path, new_path);
+                            response =
+                                format!("updated config path: {} -> {}\n", old_path, new_path);
                         } else {
                             response = format!("source config not found: {}\n", old_path);
                         }
@@ -329,7 +367,7 @@ async fn handle_client(
 }
 
 struct AppState {
-    config_map: Arc<Mutex<ConfigMap>>,
+    config_map: ConfigMap,
     port: u16,
     host: String,
     config_path: String,
@@ -338,10 +376,11 @@ struct AppState {
 impl AppState {
     pub fn new(port: u16, host: String, config_path: String) -> Self {
         Self {
-            config_map: Arc::new(Mutex::new(ConfigMap::new())),
+            config_map: ConfigMap::new(),
             port,
             host,
             config_path,
         }
     }
 }
+
