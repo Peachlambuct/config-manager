@@ -10,3 +10,4 @@ Cargo.lock
 *.md
 /*.rs
 test*
+.cursor
