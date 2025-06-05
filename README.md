@@ -21,7 +21,7 @@ ConfigMaster 是一个用 Rust 开发的高性能配置管理工具，专为微�
 | 🖥️ **CLI 工具** | 完整的命令行操作界面 | ✅ 完成 |
 | 🌐 **TCP 服务** | 持久连接和实时配置推送 | ✅ 完成 |
 | 📊 **日志系统** | 结构化日志记录和审计 | ✅ 完成 |
-| 🌐 **HTTP API** | RESTful 接口和 WebSocket | 🚧 开发中 |
+| 🌐 **HTTP API** | RESTful 接口和 WebSocket | ✅ 完成 |
 
 ## 🛠️ 技术栈
 

@@ -649,7 +649,7 @@ pub async fn handle_serve(
             let event = match result {
                 Ok(event) => event,
                 Err(e) => {
-                    debug!("文件监听错误: {}", e);
+                    debug!("file watch error: {}", e);
                     return;
                 }
             };
@@ -663,14 +663,14 @@ pub async fn handle_serve(
                         
                         // 过滤临时文件和非配置文件
                         if file_name.starts_with('.') || file_name.ends_with(".tmp") || file_name.ends_with("~") {
-                            debug!("忽略临时文件: {}", file_name);
+                            debug!("ignore temporary file: {}", file_name);
                             return;
                         }
                         
                         // 只处理配置文件类型
                         if !file_name.ends_with(".toml") && !file_name.ends_with(".json") && 
                            !file_name.ends_with(".yaml") && !file_name.ends_with(".yml") {
-                            debug!("忽略非配置文件: {}", file_name);
+                            debug!("ignore non-config file: {}", file_name);
                             return;
                         }
                         
@@ -696,17 +696,17 @@ pub async fn handle_serve(
                                                 info!("config watcher event: {:?}", event);
                                             }
                                             Err(e) => {
-                                                debug!("配置释放失败: {} - {}", file_name, e);
+                                                debug!("config release failed: {} - {}", file_name, e);
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        debug!("配置验证失败: {} - {}", file_name, e);
+                                        debug!("config validate failed: {} - {}", file_name, e);
                                     }
                                 }
                             }
                             Err(e) => {
-                                debug!("读取文件失败: {} - {}", file_name, e);
+                                debug!("read file failed: {} - {}", file_name, e);
                             }
                         }
                     }
@@ -824,7 +824,7 @@ pub async fn handle_http(
             let event = match result {
                 Ok(event) => event,
                 Err(e) => {
-                    debug!("文件监听错误: {}", e);
+                    debug!("file watch error: {}", e);
                     return;
                 }
             };
@@ -838,14 +838,14 @@ pub async fn handle_http(
                         
                         // 过滤临时文件和非配置文件
                         if file_name.starts_with('.') || file_name.ends_with(".tmp") || file_name.ends_with("~") {
-                            debug!("忽略临时文件: {}", file_name);
+                            debug!("ignore temporary file: {}", file_name);
                             return;
                         }
                         
                         // 只处理配置文件类型
                         if !file_name.ends_with(".toml") && !file_name.ends_with(".json") && 
                            !file_name.ends_with(".yaml") && !file_name.ends_with(".yml") {
-                            debug!("忽略非配置文件: {}", file_name);
+                            debug!("ignore non-config file: {}", file_name);
                             return;
                         }
                         
@@ -871,17 +871,17 @@ pub async fn handle_http(
                                                 info!("config watcher event: {:?}", event);
                                             }
                                             Err(e) => {
-                                                debug!("配置释放失败: {} - {}", file_name, e);
+                                                debug!("config release failed: {} - {}", file_name, e);
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        debug!("配置验证失败: {} - {}", file_name, e);
+                                        debug!("config validate failed: {} - {}", file_name, e);
                                     }
                                 }
                             }
                             Err(e) => {
-                                debug!("读取文件失败: {} - {}", file_name, e);
+                                debug!("read file failed: {} - {}", file_name, e);
                             }
                         }
                     }
@@ -1004,7 +1004,7 @@ async fn handle_websocket_upgrade(
 ) -> axum::response::Response {
     match query {
         Ok(Query(query)) => {
-            info!("WebSocket 升级请求成功 - 文件: {}", query.file);
+            info!("WebSocket upgrade request success - file: {}", query.file);
             
             // 检查文件是否存在于配置映射中
             let file_exists = {
@@ -1013,13 +1013,13 @@ async fn handle_websocket_upgrade(
             };
             
             if !file_exists {
-                info!("警告：请求的文件 {} 不在配置映射中", query.file);
+                info!("warning: request file {} not in config map", query.file);
             }
             
             ws.on_upgrade(move |socket| handle_websocket_connection(socket, state, query.file))
         }
         Err(e) => {
-            info!("WebSocket 查询参数解析失败: {}", e);
+            info!("WebSocket query parameters parse failed: {}", e);
             axum::response::Response::builder()
                 .status(400)
                 .body("Bad Request: Invalid query parameters".into())
@@ -1034,7 +1034,7 @@ async fn handle_websocket_connection(
     state: Arc<Mutex<AppState>>,
     file_name: String,
 ) {
-    info!("新的 WebSocket 连接，监听文件: {}", file_name);
+    info!("new WebSocket connection, watching file: {}", file_name);
 
     // 生成唯一的客户端ID
     let client_id = format!(
@@ -1068,7 +1068,7 @@ async fn handle_websocket_connection(
             }
             None => serde_json::json!({
                 "type": "error",
-                "message": format!("配置文件 {} 不存在", file_name)
+                "message": format!("config file {} not found", file_name)
             })
             .to_string(),
         }
@@ -1076,7 +1076,7 @@ async fn handle_websocket_connection(
 
     // 发送初始配置
     if let Err(e) = socket.send(Message::Text(initial_config.into())).await {
-        debug!("发送初始配置失败: {}", e);
+        debug!("send initial config failed: {}", e);
         return;
     }
 
@@ -1091,7 +1091,7 @@ async fn handle_websocket_connection(
             .insert(client_id.clone(), (file_name.clone(), tx));
     }
 
-    info!("WebSocket 客户端 {} 开始监听文件 {}", client_id, file_name);
+    info!("WebSocket client {} start watching file {}", client_id, file_name);
 
     // 分别处理发送和接收
     let (mut sender, mut receiver) = socket.split();
@@ -1116,10 +1116,10 @@ async fn handle_websocket_connection(
                         }).to_string();
 
                         if let Err(e) = sender.send(Message::Text(message.into())).await {
-                            debug!("推送配置更新失败: {}", e);
+                            debug!("push config update failed: {}", e);
                             break;
                         }
-                        debug!("成功推送配置更新到 WebSocket 客户端 {}", client_id_for_send);
+                        debug!("push config update to WebSocket client {} success", client_id_for_send);
                     } else {
                         break;
                     }
@@ -1128,7 +1128,7 @@ async fn handle_websocket_connection(
                 internal_msg = internal_rx.recv() => {
                     if let Some(msg) = internal_msg {
                         if let Err(e) = sender.send(Message::Text(msg.into())).await {
-                            debug!("发送内部消息失败: {}", e);
+                            debug!("send internal message failed: {}", e);
                             break;
                         }
                     } else {
@@ -1144,7 +1144,7 @@ async fn handle_websocket_connection(
         match msg {
             Ok(Message::Text(text)) => {
                 let text_str = text.to_string();
-                debug!("收到 WebSocket 消息: {}", text_str);
+                debug!("receive WebSocket message: {}", text_str);
                 // 处理ping消息
                 if text_str == "ping" {
                     let pong = serde_json::json!({
@@ -1154,21 +1154,21 @@ async fn handle_websocket_connection(
                     .to_string();
 
                     if let Err(_) = internal_tx.send(pong) {
-                        debug!("发送 pong 到内部通道失败");
+                        debug!("send pong to internal channel failed");
                         break;
                     }
                 }
             }
             Ok(Message::Close(_)) => {
-                debug!("WebSocket 客户端 {} 主动关闭连接", client_id);
+                debug!("WebSocket client {} closed connection", client_id);
                 break;
             }
             Err(e) => {
-                debug!("WebSocket 接收错误: {}", e);
+                debug!("WebSocket receive error: {}", e);
                 break;
             }
             _ => {
-                debug!("收到未知 WebSocket 消息类型");
+                debug!("unknown WebSocket message type");
             }
         }
     }
@@ -1182,5 +1182,5 @@ async fn handle_websocket_connection(
     // 取消发送任务
     send_task.abort();
 
-    info!("WebSocket 客户端 {} 断开连接", client_id);
+    info!("WebSocket client {} disconnected", client_id);
 }
