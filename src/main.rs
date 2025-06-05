@@ -1,26 +1,33 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
 use anyhow::Result;
 use clap::Parser;
 use colored::{Color, Colorize};
-use config_manager::command::{CliCommand, Command, Subcommand};
+use config_manager::command::{Command, Subcommand};
 use config_manager::handler::{
-    get_validation_by_config, handle_convert, handle_get, handle_show, handle_template,
-    handle_validate, handle_validate_by_validation_file, write_env_config,
+    get_validation_by_config, handle_client, handle_convert, handle_get, handle_show,
+    handle_template, handle_validate, handle_validate_by_validation_file,
 };
-use config_manager::model::config::ConfigMap;
+
+use config_manager::model::app::AppState;
+use config_manager::model::log::{LogConfig, LogManager};
 use config_manager::model::template::TemplateType;
 use config_manager::{init_tracing, read_file};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tracing::{debug, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
+    let mut log_manager = LogManager::new(LogConfig {
+        file: "test.log".to_string(),
+        level: "info".to_string(),
+    })
+    .await;
+
     let command = Command::parse();
 
     match command.subcommand {
@@ -100,13 +107,13 @@ async fn main() -> Result<()> {
                 "load config from path: {}",
                 app_state.lock().unwrap().config_path
             );
-            
+
             // 先获取配置路径，避免在循环中持有锁
             let config_path = app_state.lock().unwrap().config_path.clone();
-            
+
             // 收集所有配置文件到临时 HashMap
             let mut configs_to_load = HashMap::new();
-            
+
             // 遍历文件夹中的文件
             for entry in std::fs::read_dir(config_path)? {
                 let entry = entry?;
@@ -117,12 +124,12 @@ async fn main() -> Result<()> {
                     info!("content: {}", content);
                     let config = handle_validate(path.to_string_lossy().to_string(), content)?;
                     info!("config: {:?}", config);
-                    
+
                     // 添加到临时 HashMap，不需要获取锁
                     configs_to_load.insert(entry.file_name().to_string_lossy().to_string(), config);
                 }
             }
-            
+
             // 批量插入所有配置，只获取一次锁
             {
                 let mut app_state_guard = app_state.lock().unwrap();
@@ -136,6 +143,43 @@ async fn main() -> Result<()> {
                 app_state.lock().unwrap().config_map.len()
             );
 
+            // 创建通道用于异步通知
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, String)>();
+
+            // 启动异步任务处理通知
+            let app_state_for_notify = app_state.clone();
+            tokio::spawn(async move {
+                while let Some((file_name, config_str)) = rx.recv().await {
+                    let notify_senders: Vec<tokio::sync::mpsc::UnboundedSender<String>> = {
+                        let app_state_guard = app_state_for_notify.lock().unwrap();
+                        app_state_guard
+                            .notify_map
+                            .iter()
+                            .filter(|(_, (watched_file, _))| *watched_file == file_name)
+                            .map(|(_, (_, sender))| sender.clone())
+                            .collect()
+                    };
+                    log_manager
+                        .log_info(format!(
+                            "config file: {} updated, notify {} clients, config: {}",
+                            file_name,
+                            notify_senders.len(),
+                            config_str
+                        ))
+                        .await;
+                    let sender_count = notify_senders.len();
+                    for sender in notify_senders {
+                        if let Err(_) = sender.send(config_str.clone()) {
+                            debug!("向客户端发送通知失败，可能连接已断开");
+                        }
+                    }
+                    debug!(
+                        "已向 {} 个客户端发送 {} 的更新通知",
+                        sender_count, file_name
+                    );
+                }
+            });
+
             let app_state_for_watcher = app_state.clone();
             let mut watcher = RecommendedWatcher::new(
                 move |result: notify::Result<Event>| {
@@ -148,12 +192,22 @@ async fn main() -> Result<()> {
                             file_path.file_name().unwrap().to_string_lossy().to_string();
                         debug!("file_name: {:?}", file_name);
                         let content = std::fs::read_to_string(file_path).unwrap();
-                        let config = handle_validate(file_name.clone(), content).unwrap();
+                        let validated_config = handle_validate(file_name.clone(), content).unwrap();
+                        let config_for_notify = validated_config.clone().release_config().unwrap();
+                        let config_str = format!("{:?}", config_for_notify.config);
+
                         app_state_for_watcher
                             .lock()
                             .unwrap()
                             .config_map
-                            .insert(file_name, config);
+                            .insert(file_name.clone(), validated_config);
+
+                        // 通过通道发送通知请求
+                        if let Err(_) = tx.send((file_name.clone(), config_str)) {
+                            debug!("通知通道已关闭");
+                        }
+
+                        info!("config watcher event: {:?}", event);
                     }
                 },
                 notify::Config::default(),
@@ -179,208 +233,3 @@ async fn main() -> Result<()> {
     }
     Ok(())
 }
-
-async fn handle_client(stream: TcpStream, app_state: Arc<Mutex<AppState>>) -> Result<()> {
-    let mut reader = BufReader::new(stream);
-
-    loop {
-        let mut line = String::new();
-
-        match reader.read_line(&mut line).await {
-            Ok(0) => {
-                debug!("client closed connection");
-                break;
-            }
-            Ok(_) => {
-                let request = line.trim();
-                debug!("received request: {}", request);
-                let command = CliCommand::from_str(request);
-                let mut response = String::new();
-                debug!("command: {:?}", command);
-
-                match command {
-                    Some(CliCommand::Add { path }) => {
-                        debug!("add: {}", path);
-                        match read_file(&path) {
-                            Ok(content) => match handle_validate(path.clone(), content) {
-                                Ok(mut config) => match config.get_env_override_config() {
-                                    Ok(config) => {
-                                        app_state
-                                            .lock()
-                                            .unwrap()
-                                            .config_map
-                                            .insert(path.clone(), config.clone());
-
-                                        // 现在可以安全地使用 await
-                                        match write_env_config(
-                                            config.clone(),
-                                            Path::new(&app_state.lock().unwrap().config_path)
-                                                .join(&path)
-                                                .to_string_lossy()
-                                                .to_string(),
-                                        ) {
-                                            Ok(_) => {
-                                                let config_str = serde_json::to_string(&config)
-                                                    .unwrap_or_else(|_| {
-                                                        "add config success, but serialize failed"
-                                                            .to_string()
-                                                    });
-                                                response = format!("add result: {}\n", config_str);
-                                            }
-                                            Err(e) => {
-                                                response =
-                                                    format!("write config file failed: {}\n", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        response = format!("env override failed: {}\n", e);
-                                    }
-                                },
-                                Err(e) => {
-                                    response = format!("config validate failed: {}\n", e);
-                                }
-                            },
-                            Err(e) => {
-                                response = format!("read file failed: {}\n", e);
-                            }
-                        }
-                    }
-                    Some(CliCommand::Remove { path }) => {
-                        debug!("remove: {}", path);
-                        let removed =
-                            { app_state.lock().unwrap().config_map.remove(&path).is_some() }; // MutexGuard 在这里被释放
-
-                        if removed {
-                            let removed_path = Path::new(&app_state.lock().unwrap().config_path)
-                                .join(path.clone());
-
-                            // 删除文件
-                            match tokio::fs::remove_file(&removed_path).await {
-                                Ok(_) => {
-                                    response = format!("removed config: {}\n", path);
-                                }
-                                Err(e) => {
-                                    response = format!(
-                                        "remove config success, but delete file failed: {}\n",
-                                        e
-                                    );
-                                }
-                            }
-                        } else {
-                            response = format!("config not found: {}\n", path);
-                        }
-                    }
-                    Some(CliCommand::Get { path }) => {
-                        debug!("get: {}", path);
-                        let config_str = {
-                            match app_state.lock().unwrap().config_map.get(&path) {
-                                Some(config) => match serde_json::to_string(&config) {
-                                    Ok(config_str) => Some(config_str),
-                                    Err(e) => {
-                                        response = format!("serialize config failed: {}\n", e);
-                                        None
-                                    }
-                                },
-                                None => {
-                                    response = format!("config not found: {}\n", path);
-                                    None
-                                }
-                            }
-                        }; // MutexGuard 在这里被释放
-
-                        if let Some(config_str) = config_str {
-                            response = format!("{}\n", config_str);
-                        }
-                    }
-                    Some(CliCommand::List) => {
-                        debug!("list");
-                        let list_response = {
-                            if app_state.lock().unwrap().config_map.is_empty() {
-                                "no config file loaded".to_string()
-                            } else {
-                                let mut list_response = String::from("loaded config files:\n");
-                                for (key, _) in app_state.lock().unwrap().config_map.iter() {
-                                    list_response.push_str(&format!("  - {} ", key));
-                                }
-                                list_response
-                            }
-                        }; // MutexGuard 在这里被释放
-
-                        response = list_response;
-                    }
-                    Some(CliCommand::Update { old_path, new_path }) => {
-                        debug!("update: {} -> {}", old_path, new_path);
-                        let update_result = {
-                            if let Some(config) =
-                                app_state.lock().unwrap().config_map.remove(&old_path)
-                            {
-                                app_state
-                                    .lock()
-                                    .unwrap()
-                                    .config_map
-                                    .insert(new_path.clone(), config);
-                                true
-                            } else {
-                                false
-                            }
-                        }; // MutexGuard 在这里被释放
-
-                        if update_result {
-                            response =
-                                format!("updated config path: {} -> {}\n", old_path, new_path);
-                        } else {
-                            response = format!("source config not found: {}\n", old_path);
-                        }
-                    }
-                    None => {
-                        debug!("invalid command");
-                        response = format!("invalid command: {}\n", request);
-                    }
-                }
-
-                // 发送响应
-                let mut stream = reader.into_inner();
-
-                if let Err(e) = stream.write_all(response.as_bytes()).await {
-                    debug!("send response failed: {}", e);
-                    break;
-                }
-                if let Err(e) = stream.flush().await {
-                    debug!("flush stream failed: {}", e);
-                    break;
-                }
-
-                debug!("send response: {}", response.trim());
-
-                // 重新创建reader以继续读取下一个请求
-                reader = BufReader::new(stream);
-            }
-            Err(e) => {
-                debug!("read request failed: {}", e);
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-struct AppState {
-    config_map: ConfigMap,
-    port: u16,
-    host: String,
-    config_path: String,
-}
-
-impl AppState {
-    pub fn new(port: u16, host: String, config_path: String) -> Self {
-        Self {
-            config_map: ConfigMap::new(),
-            port,
-            host,
-            config_path,
-        }
-    }
-}
-

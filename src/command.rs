@@ -53,7 +53,7 @@ pub enum CliCommand {
 
     List,
 
-    Update { old_path: String, new_path: String },
+    Listen { path: String },
 }
 
 impl CliCommand {
@@ -62,7 +62,7 @@ impl CliCommand {
         if parts.is_empty() {
             return None;
         }
-        
+
         let command = parts[0];
 
         match command {
@@ -74,7 +74,7 @@ impl CliCommand {
                 } else {
                     None
                 }
-            },
+            }
             "remove" => {
                 if parts.len() >= 2 {
                     Some(Self::Remove {
@@ -83,7 +83,7 @@ impl CliCommand {
                 } else {
                     None
                 }
-            },
+            }
             "get" => {
                 if parts.len() >= 2 {
                     Some(Self::Get {
@@ -92,18 +92,17 @@ impl CliCommand {
                 } else {
                     None
                 }
-            },
+            }
             "list" => Some(Self::List),
-            "update" => {
-                if parts.len() >= 3 {
-                    Some(Self::Update {
-                        old_path: parts[1].to_string(),
-                        new_path: parts[2].to_string(),
+            "listen" => {
+                if parts.len() >= 2 {
+                    Some(Self::Listen {
+                        path: parts[1].to_string(),
                     })
                 } else {
                     None
                 }
-            },
+            }
             _ => None,
         }
     }
