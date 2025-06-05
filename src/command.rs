@@ -40,6 +40,8 @@ pub enum Subcommand {
         host: String,
         #[clap(short, long, default_value = ".")]
         config_path: String,
+        #[clap(long, default_value = "false")]
+        http: bool,
     },
 }
 

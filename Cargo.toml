@@ -16,10 +16,19 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 notify = { version = "8.0.0", features = ["serde"] }
 tokio = { version = "1.45.1", features = ["full"] }
-axum = "0.8.4"
+axum = { version = "0.8.4", features = ["ws"] }
 tower = "0.5.2"
 chrono = { version = "0.4.41", features = ["serde"] }
+rand = "0.8"
+futures-util = "0.3"
 
 [[example]]
 name = "tcp_send"
 path = "example/tcp_send.rs"
+
+[[example]]
+name = "ws_client"
+path = "example/ws_client.rs"
+
+[dev-dependencies]
+tokio-tungstenite = "0.20"
