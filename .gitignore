@@ -7,7 +7,7 @@
 *.xml
 *.ini
 Cargo.lock
-*.md
+Rust.md
 /*.rs
 test*
 .cursor
