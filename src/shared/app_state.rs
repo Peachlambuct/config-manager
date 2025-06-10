@@ -5,8 +5,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
-
-use crate::model::config::ConfigMap;
+use crate::domain::entities::configuration::ConfigMap;
 
 pub struct AppState {
     pub config_map: ConfigMap,

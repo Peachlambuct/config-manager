@@ -1,15 +1,18 @@
 use anyhow::Result;
 use clap::Parser;
 use colored::{Color, Colorize};
-use config_manager::command::{Command, Subcommand};
-use config_manager::handler::{
-    get_validation_by_config, handle_convert, handle_get, handle_http, handle_serve, handle_show,
-    handle_template, handle_validate, handle_validate_by_validation_file,
-};
+use config_manager::interfaces::cli::command::{Command, Subcommand};
 
-use config_manager::model::log::{LogConfig, LogManager};
-use config_manager::model::template::TemplateType;
-use config_manager::{init_tracing, read_file};
+use config_manager::application::services::configuration_service::ConfigurationService;
+use config_manager::application::services::template_service::TemplateService;
+use config_manager::application::services::validation_service::ValidationService;
+use config_manager::domain::entities::template::TemplateType;
+use config_manager::domain::services::config_validation::ConfigValidationService;
+use config_manager::domain::services::format_converter::FormatConverterService;
+use config_manager::interfaces::http::server::handle_http;
+use config_manager::interfaces::tcp::server::handle_serve;
+use config_manager::infrastructure::logging::log_manager::{LogConfig, LogManager};
+use config_manager::shared::utils::{init_tracing, read_file};
 use tracing::debug;
 
 #[tokio::main]
@@ -31,7 +34,7 @@ async fn main() -> Result<()> {
             if validate_file.is_empty() {
                 debug!("validate: {}", file);
                 let content = read_file(&file)?;
-                let config = handle_validate(file, content)?;
+                let config = FormatConverterService::validate_config(file, content)?;
                 println!(
                     "config validate success, file format is {}",
                     (config.config_type).to_string().color(Color::Green)
@@ -39,13 +42,15 @@ async fn main() -> Result<()> {
             } else {
                 debug!("validate: {}", validate_file);
                 let validation_content = read_file(&validate_file)?;
-                let validation_config = handle_validate(validate_file, validation_content)?;
-                let validation = get_validation_by_config(&validation_config).unwrap();
+                let validation_config =
+                    FormatConverterService::validate_config(validate_file, validation_content)?;
+                let validation = ValidationService::get_validation_by_config(&validation_config)?;
                 let content = read_file(&file)?;
-                let config = handle_validate(file.clone(), content)?;
+                let config = FormatConverterService::validate_config(file.clone(), content)?;
                 let config_type = config.config_type.clone();
                 debug!("config: {:?}", config);
-                let validation_result = handle_validate_by_validation_file(validation, config);
+                let validation_result =
+                    ConfigValidationService::validate_with_rules(validation, config);
                 if !validation_result.is_valid {
                     println!(
                         "{} config validate failed: {:?}",
@@ -63,18 +68,18 @@ async fn main() -> Result<()> {
         }
         Subcommand::Show { file, get, deepth } => {
             if get.is_empty() {
-                handle_show(file, deepth)?;
+                ConfigurationService::display_configuration(file, deepth)?;
             } else {
-                handle_get(file, get)?;
+                ConfigurationService::get_configuration_value(file, get)?;
             }
         }
         Subcommand::Convert { input, output } => {
             debug!("convert: {} -> {}", input, output);
-            handle_convert(input, output)?;
+            ConfigurationService::convert_configuration(input, output)?;
         }
         Subcommand::Template { template, format } => {
             debug!("template: {} {}", template, format);
-            handle_template(TemplateType::from(template), format)?;
+            TemplateService::write_template(TemplateType::from(template), format)?;
         }
         Subcommand::Serve {
             port,
@@ -84,7 +89,7 @@ async fn main() -> Result<()> {
         } => {
             if http {
                 // HTTP 模式需要先创建 AppState
-                use config_manager::model::app::AppState;
+                use config_manager::shared::app_state::AppState;
                 use std::sync::{Arc, Mutex};
 
                 let app_state = AppState::new(port, host.clone(), config_path);

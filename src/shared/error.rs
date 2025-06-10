@@ -25,6 +25,10 @@ pub enum ConfigError {
     InvalidPath,
     #[error("environment variable format error: {env_var}")]
     InvalidEnvVar { env_var: String },
+    #[error("now repository config not supported")]
+    NowRepositoryConfigNotSupportFunction,
+    #[error("invalid config path: {0}")]
+    InvalidConfigPath(String),
 }
 
 #[derive(Debug, Error)]
@@ -41,4 +45,15 @@ pub enum ValidationError {
     CustomRuleViolation { field: String, rule: String },
     #[error("field {field} is not defined")]
     UndefinedField { field: String },
+}
+
+
+#[derive(Debug, Error)]
+pub enum TemplateError {
+    #[error("template parse error")]
+    ParseTemplateError,
+    #[error("template not found")]
+    TemplateNotFound,
+    #[error("now repository template not supported")]
+    NowRepositoryTemplateNotSupportFunction,
 }

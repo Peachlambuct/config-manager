@@ -14,3 +14,5 @@ test*
 /**/Cargo.toml
 /**/Cargo.lock
 *.log
+.idea
+docs

@@ -5,9 +5,9 @@ use std::{
 
 use tracing::debug;
 
-use crate::error::ValidationError;
+use crate::shared::error::ValidationError;
 
-use super::config::Config;
+use super::configuration::Config;
 
 // 将ValidationRule定义为类型别名，而不是trait
 pub type ValidationRule = dyn Fn(&Config) -> Result<(), ValidationError> + Send + Sync + 'static;
@@ -47,7 +47,7 @@ impl Validation {
     }
 
     pub fn field_type(mut self, field: &str, field_type: FieldType) -> Self {
-        self.field_types.insert(field.to_string(), field_type);
+        self.field_types.insert(field.to_string(), field_type); 
         self
     }
 

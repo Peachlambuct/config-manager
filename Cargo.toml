@@ -21,6 +21,7 @@ tower = "0.5.2"
 chrono = { version = "0.4.41", features = ["serde"] }
 rand = "0.8"
 futures-util = "0.3"
+async-trait = "0.1.88"
 
 [[example]]
 name = "tcp_send"
