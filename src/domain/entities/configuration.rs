@@ -20,7 +20,7 @@ pub struct Config {
 impl Config {
     pub fn new() -> Self {
         Self {
-            path: ConfigPath::new(String::new()).unwrap(),
+            path: ConfigPath::new(String::new(), false).unwrap(),
             config: HashMap::new(),
             config_type: ConfigType::Unknown,
         }
@@ -59,7 +59,7 @@ impl Config {
         };
 
         Ok(Self {
-            path: ConfigPath::new(path).unwrap(),
+            path: ConfigPath::new(path, true).unwrap(),
             config: config_map,
             config_type,
         })

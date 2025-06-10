@@ -63,7 +63,7 @@ impl ConfigurationRepository for FileConfigRepository {
 
     async fn get(&self, path: String) -> Result<Config, ConfigError> {
         let content = read_file(&path)?;
-        let config = FormatConverterService::new(ConfigPath::new(path).unwrap(), content)
+        let config = FormatConverterService::new(ConfigPath::new(path, true).unwrap(), content)
             .validate_config()?;
         Ok(config)
     }

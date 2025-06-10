@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
             if validate_file.is_empty() {
                 debug!("validate: {}", file);
                 let content = read_file(&file)?;
-                let config = FormatConverterService::new(ConfigPath::new(file).unwrap(), content)
+                let config = FormatConverterService::new(ConfigPath::new(file, true).unwrap(), content)
                     .validate_config()?;
                 println!(
                     "config validate success, file format is {}",
@@ -45,14 +45,14 @@ async fn main() -> Result<()> {
                 debug!("validate: {}", validate_file);
                 let validation_content = read_file(&validate_file)?;
                 let validation_config = FormatConverterService::new(
-                    ConfigPath::new(validate_file).unwrap(),
+                    ConfigPath::new(validate_file, true).unwrap(),
                     validation_content,
                 )
                 .validate_config()?;
                 let validation = ValidationService::get_validation_by_config(&validation_config)?;
                 let content = read_file(&file)?;
                 let config =
-                    FormatConverterService::new(ConfigPath::new(file.clone()).unwrap(), content)
+                    FormatConverterService::new(ConfigPath::new(file.clone(), true).unwrap(), content)
                         .validate_config()?;
                 let config_type = config.config_type.clone();
                 debug!("config: {:?}", config);

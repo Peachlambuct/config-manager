@@ -49,7 +49,7 @@ async fn handle_client(stream: TcpStream, app_state: Arc<Mutex<AppState>>) -> an
                         match read_file(&path) {
                             Ok(content) => {
                                 match FormatConverterService::new(
-                                    ConfigPath::new(path.clone()).unwrap(),
+                                    ConfigPath::new(path.clone(), true).unwrap(),
                                     content,
                                 )
                                 .validate_config()
@@ -305,7 +305,7 @@ pub async fn handle_serve(
             let content = read_file(path.to_string_lossy().to_string().as_str())?;
             info!("content: {}", content);
             let config = FormatConverterService::new(
-                ConfigPath::new(path.to_string_lossy().to_string()).unwrap(),
+                ConfigPath::new(path.to_string_lossy().to_string(), true).unwrap(),
                 content,
             )
             .validate_config()?;
@@ -403,7 +403,7 @@ pub async fn handle_serve(
                         match std::fs::read_to_string(file_path) {
                             Ok(content) => {
                                 match FormatConverterService::new(
-                                    ConfigPath::new(file_name.clone()).unwrap(),
+                                    ConfigPath::new(file_name.clone(), true).unwrap(),
                                     content,
                                 )
                                 .validate_config()
