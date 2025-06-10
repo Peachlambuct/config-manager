@@ -54,7 +54,7 @@ pub async fn handle_http(
             let content = read_file(path.to_string_lossy().to_string().as_str())?;
             info!("content: {}", content);
             let config = FormatConverterService::new(
-                ConfigPath::new(path.to_string_lossy().to_string(), true).unwrap(),
+                ConfigPath::new(path.to_string_lossy().to_string()).unwrap(),
                 content,
             )
             .validate_config()?;
@@ -148,7 +148,7 @@ pub async fn handle_http(
                         match std::fs::read_to_string(file_path) {
                             Ok(content) => {
                                 match FormatConverterService::new(
-                                    ConfigPath::new(file_name.clone(), true).unwrap(),
+                                    ConfigPath::new(file_name.clone()).unwrap(),
                                     content,
                                 )
                                 .validate_config()
@@ -276,7 +276,7 @@ async fn handle_http_update_config(
     axum::extract::Path(path): axum::extract::Path<String>,
     body: String,
 ) -> impl axum::response::IntoResponse {
-    match FormatConverterService::new(ConfigPath::new(path.clone(), true).unwrap(), body)
+    match FormatConverterService::new(ConfigPath::new(path.clone()).unwrap(), body)
         .validate_config()
     {
         Ok(config) => {

@@ -13,7 +13,7 @@ impl ConfigurationService {
     pub fn display_configuration(path: String, depth: usize) -> Result<(), ConfigError> {
         let content = read_file(&path)?;
         let config = FormatConverterService::new(
-            ConfigPath::new(path.clone(), true).unwrap(),
+            ConfigPath::new(path.clone()).unwrap(),
             content,
         )
         .validate_config()?;
@@ -23,7 +23,7 @@ impl ConfigurationService {
 
     pub fn get_configuration_value(path: String, key: String) -> Result<(), ConfigError> {
         let content = read_file(&path)?;
-        let config = FormatConverterService::new(ConfigPath::new(path, true).unwrap(), content)
+        let config = FormatConverterService::new(ConfigPath::new(path).unwrap(), content)
             .validate_config()?;
         let value = config.get(&key);
         if let Some(value) = value {
@@ -36,11 +36,8 @@ impl ConfigurationService {
 
     pub fn convert_configuration(input: String, output: String) -> Result<(), ConfigError> {
         let content = read_file(&input)?;
-        let config = FormatConverterService::new(
-            ConfigPath::new(input.clone(), true).unwrap(),
-            content,
-        )
-        .validate_config()?;
+        let config = FormatConverterService::new(ConfigPath::new(input.clone()).unwrap(), content)
+            .validate_config()?;
 
         // 检测目标格式
         let target_format = if output.ends_with(".json") {
