@@ -9,7 +9,7 @@ use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tracing::{debug, info};
 
 use crate::{
-    domain::services::{env_override::EnvOverrideService, format_converter::FormatConverterService},
+    domain::{services::{env_override::EnvOverrideService, format_converter::FormatConverterService}, value_objects::config_path::ConfigPath},
     infrastructure::{
         logging::log_manager::LogManager,
         repositories::file_config_repository::FileConfigRepository,
@@ -53,10 +53,11 @@ pub async fn handle_http(
             info!("load config file: {}", path.to_string_lossy().to_string());
             let content = read_file(path.to_string_lossy().to_string().as_str())?;
             info!("content: {}", content);
-            let config = FormatConverterService::validate_config(
-                path.to_string_lossy().to_string(),
+            let config = FormatConverterService::new(
+                ConfigPath::new(path.to_string_lossy().to_string()).unwrap(),
                 content,
-            )?;
+            )
+            .validate_config()?;
             info!("config: {:?}", config);
 
             // 添加到临时 HashMap，不需要获取锁
@@ -146,10 +147,12 @@ pub async fn handle_http(
 
                         match std::fs::read_to_string(file_path) {
                             Ok(content) => {
-                                match FormatConverterService::validate_config(
-                                    file_name.clone(),
+                                match FormatConverterService::new(
+                                    ConfigPath::new(file_name.clone()).unwrap(),
                                     content,
-                                ) {
+                                )
+                                .validate_config()
+                                {
                                     Ok(mut validated_config) => {
                                         match EnvOverrideService::apply_env_override(
                                             &mut validated_config,
@@ -273,7 +276,9 @@ async fn handle_http_update_config(
     axum::extract::Path(path): axum::extract::Path<String>,
     body: String,
 ) -> impl axum::response::IntoResponse {
-    match FormatConverterService::validate_config(path.clone(), body) {
+    match FormatConverterService::new(ConfigPath::new(path.clone()).unwrap(), body)
+        .validate_config()
+    {
         Ok(config) => {
             let mut app_state = state.lock().unwrap();
             app_state.config_map.insert(path.clone(), config.clone());

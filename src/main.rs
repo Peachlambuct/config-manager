@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use colored::{Color, Colorize};
+use config_manager::domain::value_objects::config_path::ConfigPath;
 use config_manager::interfaces::cli::command::{Command, Subcommand};
 
 use config_manager::application::services::configuration_service::ConfigurationService;
@@ -9,9 +10,9 @@ use config_manager::application::services::validation_service::ValidationService
 use config_manager::domain::entities::template::TemplateType;
 use config_manager::domain::services::config_validation::ConfigValidationService;
 use config_manager::domain::services::format_converter::FormatConverterService;
+use config_manager::infrastructure::logging::log_manager::{LogConfig, LogManager};
 use config_manager::interfaces::http::server::handle_http;
 use config_manager::interfaces::tcp::server::handle_serve;
-use config_manager::infrastructure::logging::log_manager::{LogConfig, LogManager};
 use config_manager::shared::utils::{init_tracing, read_file};
 use tracing::debug;
 
@@ -34,7 +35,8 @@ async fn main() -> Result<()> {
             if validate_file.is_empty() {
                 debug!("validate: {}", file);
                 let content = read_file(&file)?;
-                let config = FormatConverterService::validate_config(file, content)?;
+                let config = FormatConverterService::new(ConfigPath::new(file).unwrap(), content)
+                    .validate_config()?;
                 println!(
                     "config validate success, file format is {}",
                     (config.config_type).to_string().color(Color::Green)
@@ -42,11 +44,16 @@ async fn main() -> Result<()> {
             } else {
                 debug!("validate: {}", validate_file);
                 let validation_content = read_file(&validate_file)?;
-                let validation_config =
-                    FormatConverterService::validate_config(validate_file, validation_content)?;
+                let validation_config = FormatConverterService::new(
+                    ConfigPath::new(validate_file).unwrap(),
+                    validation_content,
+                )
+                .validate_config()?;
                 let validation = ValidationService::get_validation_by_config(&validation_config)?;
                 let content = read_file(&file)?;
-                let config = FormatConverterService::validate_config(file.clone(), content)?;
+                let config =
+                    FormatConverterService::new(ConfigPath::new(file.clone()).unwrap(), content)
+                        .validate_config()?;
                 let config_type = config.config_type.clone();
                 debug!("config: {:?}", config);
                 let validation_result =

@@ -2,7 +2,7 @@ use crate::{
     domain::{
         entities::{configuration::Config, template::TemplateType},
         services::format_converter::FormatConverterService,
-        value_objects::config_format::ConfigType,
+        value_objects::{config_format::ConfigType, config_path::ConfigPath},
     },
     shared::{error::ConfigError, utils::read_file},
 };
@@ -12,14 +12,16 @@ pub struct ConfigurationService;
 impl ConfigurationService {
     pub fn display_configuration(path: String, depth: usize) -> Result<(), ConfigError> {
         let content = read_file(&path)?;
-        let config = FormatConverterService::validate_config(path.clone(), content)?;
+        let config = FormatConverterService::new(ConfigPath::new(path.clone()).unwrap(), content)
+            .validate_config()?;
         config.show(&path, depth);
         Ok(())
     }
 
     pub fn get_configuration_value(path: String, key: String) -> Result<(), ConfigError> {
         let content = read_file(&path)?;
-        let config = FormatConverterService::validate_config(path.clone(), content)?;
+        let config = FormatConverterService::new(ConfigPath::new(path).unwrap(), content)
+            .validate_config()?;
         let value = config.get(&key);
         if let Some(value) = value {
             Config::display_config_value(&key, &value, 0, false, 0);
@@ -31,7 +33,8 @@ impl ConfigurationService {
 
     pub fn convert_configuration(input: String, output: String) -> Result<(), ConfigError> {
         let content = read_file(&input)?;
-        let config = FormatConverterService::validate_config(input.clone(), content)?;
+        let config = FormatConverterService::new(ConfigPath::new(input.clone()).unwrap(), content)
+            .validate_config()?;
 
         // 检测目标格式
         let target_format = if output.ends_with(".json") {

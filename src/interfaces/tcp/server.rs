@@ -12,9 +12,9 @@ use tokio::{
 use tracing::{debug, info};
 
 use crate::{
-    domain::services::{
+    domain::{services::{
         env_override::EnvOverrideService, format_converter::FormatConverterService,
-    },
+    }, value_objects::config_path::ConfigPath},
     infrastructure::{
         logging::log_manager::LogManager,
         repositories::file_config_repository::FileConfigRepository,
@@ -48,7 +48,11 @@ async fn handle_client(stream: TcpStream, app_state: Arc<Mutex<AppState>>) -> an
                         debug!("add: {}", path);
                         match read_file(&path) {
                             Ok(content) => {
-                                match FormatConverterService::validate_config(path.clone(), content)
+                                match FormatConverterService::new(
+                                    ConfigPath::new(path.clone()).unwrap(),
+                                    content,
+                                )
+                                .validate_config()
                                 {
                                     Ok(mut config) => {
                                         match EnvOverrideService::apply_env_override(&mut config) {
@@ -300,10 +304,11 @@ pub async fn handle_serve(
             info!("load config file: {}", path.to_string_lossy().to_string());
             let content = read_file(path.to_string_lossy().to_string().as_str())?;
             info!("content: {}", content);
-            let config = FormatConverterService::validate_config(
-                path.to_string_lossy().to_string(),
+            let config = FormatConverterService::new(
+                ConfigPath::new(path.to_string_lossy().to_string()).unwrap(),
                 content,
-            )?;
+            )
+            .validate_config()?;
             info!("config: {:?}", config);
 
             // 添加到临时 HashMap，不需要获取锁
@@ -397,10 +402,12 @@ pub async fn handle_serve(
 
                         match std::fs::read_to_string(file_path) {
                             Ok(content) => {
-                                match FormatConverterService::validate_config(
-                                    file_name.clone(),
+                                match FormatConverterService::new(
+                                    ConfigPath::new(file_name.clone()).unwrap(),
                                     content,
-                                ) {
+                                )
+                                .validate_config()
+                                {
                                     Ok(mut validated_config) => {
                                         match EnvOverrideService::apply_env_override(
                                             &mut validated_config,

@@ -7,7 +7,7 @@ use crate::{
         entities::configuration::Config,
         repositories::configuration_repository::ConfigurationRepository,
         services::format_converter::FormatConverterService,
-        value_objects::config_format::ConfigType,
+        value_objects::{config_format::ConfigType, config_path::ConfigPath},
     },
     shared::{error::ConfigError, utils::read_file},
 };
@@ -63,7 +63,8 @@ impl ConfigurationRepository for FileConfigRepository {
 
     async fn get(&self, path: String) -> Result<Config, ConfigError> {
         let content = read_file(&path)?;
-        let config = FormatConverterService::validate_config(path.clone(), content)?;
+        let config = FormatConverterService::new(ConfigPath::new(path).unwrap(), content)
+            .validate_config()?;
         Ok(config)
     }
 

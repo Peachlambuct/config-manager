@@ -1,18 +1,23 @@
 use crate::{
-    shared::utils::delete_ignore_line,
     domain::{
         entities::configuration::Config,
-        value_objects::config_format::ConfigType,
-    },
-    shared::error::ConfigError,
+        value_objects::{config_format::ConfigType, config_path::ConfigPath},
+    }, shared::{error::ConfigError, utils::delete_ignore_line}
 };
 
-pub struct FormatConverterService;
+pub struct FormatConverterService {
+    pub config_path: ConfigPath,
+    pub content: String,
+}
 
 impl FormatConverterService {
-    pub fn validate_config(path: String, content: String) -> Result<Config, ConfigError> {
+    pub fn new(config_path: ConfigPath, content: String) -> Self {
+        Self { config_path, content }
+    }
+
+    pub fn validate_config(&self) -> Result<Config, ConfigError> {
         let mut config_type = ConfigType::Unknown;
-        let path = path.trim().to_lowercase();
+        let path = self.config_path.as_str().trim().to_lowercase();
         if path.is_empty() {
             return Err(ConfigError::EmptyPath);
         } else if path.ends_with(".toml") {
@@ -23,7 +28,7 @@ impl FormatConverterService {
             config_type = ConfigType::Yaml;
         }
     
-        let processed_content = delete_ignore_line(&content);
+        let processed_content = delete_ignore_line(&self.content);
     
         if config_type == ConfigType::Unknown {
             config_type = Self::detect_format(&processed_content)?;
