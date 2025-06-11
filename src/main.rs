@@ -13,8 +13,8 @@ use config_manager::domain::services::config_validation::ConfigValidationService
 use config_manager::domain::services::format_converter::FormatConverterService;
 use config_manager::infrastructure::logging::log_manager::{LogConfig, LogManager};
 use config_manager::infrastructure::repositories::memory_template_repository::MemoryTemplateRepository;
-use config_manager::interfaces::http::server::handle_http;
-use config_manager::interfaces::tcp::server::handle_serve;
+use config_manager::interfaces::http::server::HttpServer;
+use config_manager::interfaces::tcp::server::TcpServer;
 use config_manager::shared::utils::{init_tracing, read_file};
 use tracing::debug;
 
@@ -104,17 +104,20 @@ async fn main() -> Result<()> {
             config_path,
             http,
         } => {
+            use config_manager::shared::app_state::AppState;
+            use std::sync::{Arc, Mutex};
+
+            let app_state = AppState::new(port, host.clone(), config_path);
+            let app_state = Arc::new(Mutex::new(app_state));
             if http {
                 // HTTP 模式需要先创建 AppState
-                use config_manager::shared::app_state::AppState;
-                use std::sync::{Arc, Mutex};
-
-                let app_state = AppState::new(port, host.clone(), config_path);
-                let app_state = Arc::new(Mutex::new(app_state));
-
-                handle_http(port, host, app_state, log_manager).await?;
+                HttpServer::new(port, host, app_state, log_manager)
+                    .start()
+                    .await?;
             } else {
-                handle_serve(port, host, config_path, log_manager).await?;
+                TcpServer::new(port, host, app_state, log_manager)
+                    .start()
+                    .await?;
             }
         }
     }

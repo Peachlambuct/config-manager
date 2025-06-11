@@ -18,14 +18,10 @@ pub struct FileConfigRepository {
 
 impl FileConfigRepository {
     pub fn new(config_path: String) -> Self {
-        if !Path::new(&config_path).exists() {
-            std::fs::create_dir_all(config_path.clone()).unwrap();
-        }
-
         Self { config_path }
     }
 
-    pub fn save(&self, config: Config) -> Result<(), ConfigError> {
+    pub fn save(&self, config: Config, path: &str) -> Result<(), ConfigError> {
         // 转换为serde_json::Value以避免类型标签
         let serde_value = config.to_serde_value();
 
@@ -45,8 +41,8 @@ impl FileConfigRepository {
         };
 
         // 写入目标文件
-        std::fs::write(&self.config_path, converted_content)
-            .map_err(|e| ConfigError::IoError(e))?;
+        let save_path = self.get_config_save_path(path);
+        std::fs::write(save_path, converted_content).unwrap();
         Ok(())
     }
 
@@ -57,8 +53,8 @@ impl FileConfigRepository {
 
 #[async_trait]
 impl ConfigurationRepository for FileConfigRepository {
-    async fn save(&self, config: Config) -> Result<(), ConfigError> {
-        self.save(config)
+    async fn save(&self, config: Config, path: &str) -> Result<(), ConfigError> {
+        self.save(config, path)
     }
 
     async fn get(&self, path: String) -> Result<Config, ConfigError> {

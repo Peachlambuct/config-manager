@@ -3,7 +3,7 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait ConfigurationRepository {
-    async fn save(&self, config: Config) -> Result<(), ConfigError>;
+    async fn save(&self, config: Config, path: &str) -> Result<(), ConfigError>;
     async fn get(&self, path: String) -> Result<Config, ConfigError>;
     async fn get_all(&self) -> Result<Vec<Config>, ConfigError>;
     async fn delete(&self, path: String) -> Result<(), ConfigError>;
