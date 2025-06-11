@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use colored::{Color, Colorize};
 use config_manager::domain::value_objects::config_path::ConfigPath;
+use config_manager::infrastructure::repositories::file_config_repository::FileConfigRepository;
 use config_manager::interfaces::cli::command::{Command, Subcommand};
 
 use config_manager::application::services::configuration_service::ConfigurationService;
@@ -11,6 +12,7 @@ use config_manager::domain::entities::template::TemplateType;
 use config_manager::domain::services::config_validation::ConfigValidationService;
 use config_manager::domain::services::format_converter::FormatConverterService;
 use config_manager::infrastructure::logging::log_manager::{LogConfig, LogManager};
+use config_manager::infrastructure::repositories::memory_template_repository::MemoryTemplateRepository;
 use config_manager::interfaces::http::server::handle_http;
 use config_manager::interfaces::tcp::server::handle_serve;
 use config_manager::shared::utils::{init_tracing, read_file};
@@ -75,18 +77,26 @@ async fn main() -> Result<()> {
         }
         Subcommand::Show { file, get, deepth } => {
             if get.is_empty() {
-                ConfigurationService::display_configuration(file, deepth)?;
+                ConfigurationService::new(Box::new(FileConfigRepository::new(file.clone())))
+                    .display_configuration(file, deepth)
+                    .await?;
             } else {
-                ConfigurationService::get_configuration_value(file, get)?;
+                ConfigurationService::new(Box::new(FileConfigRepository::new(file.clone())))
+                    .get_configuration_value(file, get)
+                    .await?;
             }
         }
         Subcommand::Convert { input, output } => {
             debug!("convert: {} -> {}", input, output);
-            ConfigurationService::convert_configuration(input, output)?;
+            ConfigurationService::new(Box::new(FileConfigRepository::new(input.clone())))
+                .convert_configuration(input, output)
+                .await?;
         }
         Subcommand::Template { template, format } => {
             debug!("template: {} {}", template, format);
-            TemplateService::write_template(TemplateType::from(template), format)?;
+            TemplateService::new(Box::new(MemoryTemplateRepository::new()))
+                .write_template(TemplateType::from(template), format)
+                .await?;
         }
         Subcommand::Serve {
             port,

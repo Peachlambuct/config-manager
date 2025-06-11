@@ -1,30 +1,37 @@
 use crate::{
     domain::{
         entities::{configuration::Config, template::TemplateType},
-        services::format_converter::FormatConverterService,
-        value_objects::{config_format::ConfigType, config_path::ConfigPath},
+        repositories::configuration_repository::ConfigurationRepository,
+        value_objects::config_format::ConfigType,
     },
-    shared::{error::ConfigError, utils::read_file},
+    shared::error::ConfigError,
 };
 
-pub struct ConfigurationService;
+pub struct ConfigurationService {
+    pub config_repository: Box<dyn ConfigurationRepository>,
+}
 
 impl ConfigurationService {
-    pub fn display_configuration(path: String, depth: usize) -> Result<(), ConfigError> {
-        let content = read_file(&path)?;
-        let config = FormatConverterService::new(
-            ConfigPath::new(path.clone()).unwrap(),
-            content,
-        )
-        .validate_config()?;
+    pub fn new(config_repository: Box<dyn ConfigurationRepository>) -> Self {
+        Self { config_repository }
+    }
+
+    pub async fn display_configuration(
+        &self,
+        path: String,
+        depth: usize,
+    ) -> Result<(), ConfigError> {
+        let config = self.config_repository.get(path.clone()).await?;
         config.show(&path, depth);
         Ok(())
     }
 
-    pub fn get_configuration_value(path: String, key: String) -> Result<(), ConfigError> {
-        let content = read_file(&path)?;
-        let config = FormatConverterService::new(ConfigPath::new(path).unwrap(), content)
-            .validate_config()?;
+    pub async fn get_configuration_value(
+        &self,
+        path: String,
+        key: String,
+    ) -> Result<(), ConfigError> {
+        let config = self.config_repository.get(path.clone()).await?;
         let value = config.get(&key);
         if let Some(value) = value {
             Config::display_config_value(&key, &value, 0, false, 0);
@@ -34,10 +41,12 @@ impl ConfigurationService {
         Ok(())
     }
 
-    pub fn convert_configuration(input: String, output: String) -> Result<(), ConfigError> {
-        let content = read_file(&input)?;
-        let config = FormatConverterService::new(ConfigPath::new(input.clone()).unwrap(), content)
-            .validate_config()?;
+    pub async fn convert_configuration(
+        &self,
+        input: String,
+        output: String,
+    ) -> Result<(), ConfigError> {
+        let config = self.config_repository.get(input.clone()).await?;
 
         // 检测目标格式
         let target_format = if output.ends_with(".json") {
@@ -48,7 +57,7 @@ impl ConfigurationService {
             ConfigType::Toml
         } else {
             return Err(ConfigError::UnsupportedFormat {
-                format: "无法从文件扩展名识别目标格式".to_string(),
+                format: "not a valid config file".to_string(),
             });
         };
 
@@ -74,18 +83,22 @@ impl ConfigurationService {
         std::fs::write(&output, converted_content).map_err(|e| ConfigError::IoError(e))?;
 
         println!(
-            "✅ 转换完成: {} ({:?}) -> {} ({:?})",
+            "✅ convert success: {} ({:?}) -> {} ({:?})",
             input, config.config_type, output, target_format
         );
 
         Ok(())
     }
 
-    pub fn generate_template(template: TemplateType, format: String) -> Result<(), ConfigError> {
+    pub async fn generate_template(
+        &self,
+        template: TemplateType,
+        format: String,
+    ) -> Result<(), ConfigError> {
         let format = format.trim().to_lowercase();
         if format.is_empty() {
             return Err(ConfigError::UnsupportedFormat {
-                format: "无法从文件扩展名识别目标格式".to_string(),
+                format: "not a valid config file".to_string(),
             });
         }
         let format = match format.as_str() {
@@ -94,7 +107,7 @@ impl ConfigurationService {
             "toml" => ConfigType::Toml,
             _ => {
                 return Err(ConfigError::UnsupportedFormat {
-                    format: "无法从文件扩展名识别目标格式".to_string(),
+                    format: "not a valid config file".to_string(),
                 });
             }
         };
@@ -117,7 +130,7 @@ impl ConfigurationService {
                 return Err(ConfigError::UnknownConfigType);
             }
         };
-        println!("🔧 生成配置文件: {}", converted_content);
+        println!("🔧 generate config file: {}", converted_content);
         let format_ext = match format {
             ConfigType::Json => "json",
             ConfigType::Yaml => "yaml",
@@ -125,11 +138,11 @@ impl ConfigurationService {
             ConfigType::Unknown => "txt",
         };
         let output = format!("{}-config.{}", template, format_ext);
-        println!("📝 输出文件名: {}", output);
+        println!("📝 output file name: {}", output);
         // 写入目标文件
         std::fs::write(&output, converted_content).map_err(|e| ConfigError::IoError(e))?;
 
-        println!("✅ 模板文件已生成: {}", output);
+        println!("✅ template file generated: {}", output);
 
         Ok(())
     }

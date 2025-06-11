@@ -9,4 +9,5 @@ pub trait TemplateRepository {
     async fn delete(&self, path: String) -> Result<(), TemplateError>;
     async fn update(&self, template: TemplateType, path: String) -> Result<(), TemplateError>;
     async fn get_default_template(&self, template: TemplateType) -> Result<TemplateType, TemplateError>;
+    async fn write_template_by_type_and_format(&self, template: TemplateType, format: String) -> Result<(), TemplateError>;
 }

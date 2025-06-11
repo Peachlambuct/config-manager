@@ -5,7 +5,8 @@ use serde_json::Number;
 
 use crate::{
     domain::{
-        entities::template::TemplateType, value_objects::{config_format::ConfigType, config_path::ConfigPath},
+        entities::template::TemplateType,
+        value_objects::{config_format::ConfigType, config_path::ConfigPath},
     },
     shared::error::ConfigError,
 };
@@ -420,7 +421,15 @@ impl ConfigValue {
     // 获取数字值
     pub fn as_number(&self) -> Option<f64> {
         match self {
-            ConfigValue::Number(n) => n.as_f64(),
+            ConfigValue::Number(n) => {
+                n.as_f64().or_else(|| {
+                    // 备用：尝试从 i64 转换
+                    n.as_i64().map(|i| i as f64)
+                }).or_else(|| {
+                    // 备用：尝试从 u64 转换  
+                    n.as_u64().map(|u| u as f64)
+                })
+            },
             _ => None,
         }
     }

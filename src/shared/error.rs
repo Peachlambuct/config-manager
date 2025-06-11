@@ -56,4 +56,10 @@ pub enum TemplateError {
     TemplateNotFound,
     #[error("now repository template not supported")]
     NowRepositoryTemplateNotSupportFunction,
+    #[error("unsupported format")]
+    UnsupportedFormat { format: String },
+    #[error("unknown config type")]
+    UnknownConfigType,
+    #[error("io error")]
+    IoError(#[from] std::io::Error),
 }

@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::shared::error::ValidationError;
 
@@ -47,7 +47,7 @@ impl Validation {
     }
 
     pub fn field_type(mut self, field: &str, field_type: FieldType) -> Self {
-        self.field_types.insert(field.to_string(), field_type); 
+        self.field_types.insert(field.to_string(), field_type);
         self
     }
 
@@ -73,7 +73,10 @@ pub enum FieldType {
 impl Display for FieldType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            FieldType::String { max_length, min_length } => {
+            FieldType::String {
+                max_length,
+                min_length,
+            } => {
                 write!(f, "String(max: {:?}, min: {:?})", max_length, min_length)
             }
             FieldType::Number { min, max } => {
@@ -103,6 +106,8 @@ impl ValidationConfig {
     pub fn validate(&self) -> ValidationResult {
         let mut errors: Vec<ValidationError> = Vec::new();
 
+        info!("validation: {:?}", self.validation);
+
         for field in self.validation.required_fields.iter() {
             let value = self.config.get(field);
             debug!("field: {}, value: {:?}", field, value);
@@ -117,10 +122,11 @@ impl ValidationConfig {
             let value = self.config.get(field);
             debug!("field: {}, value: {:?}", field, value);
             if let Some(value) = value {
+                info!("field_type: {:?}", field_type);
                 match field_type {
                     FieldType::String {
                         max_length,
-                        min_length: _,
+                        min_length,
                     } => {
                         if let Some(max_length) = max_length {
                             if let Some(len) = value.len() {
@@ -135,10 +141,28 @@ impl ValidationConfig {
                                 }
                             }
                         }
+                        if let Some(min_length) = min_length {
+                            if let Some(len) = value.len() {
+                                if len < *min_length {
+                                    debug!("len: {}, min_length: {}", len, min_length);
+
+                                    errors.push(ValidationError::TypeMismatch {
+                                        field: field.clone(),
+                                        expected: field_type.to_string(),
+                                        actual: value.to_string(),
+                                    });
+                                }
+                            }
+                        }
                     }
-                    FieldType::Number { min, max: _ } => {
-                        if let Some(min) = min {
-                            if let Some(num_value) = value.as_number() {
+                    FieldType::Number { min, max } => {
+                        info!("value.as_number(): {:?}", value.as_number());
+
+                        if let Some(num_value) = value.as_number() {
+                            debug!("num_value: {}", num_value);
+
+                            // 检查最小值
+                            if let Some(min) = min {
                                 debug!("num_value: {}, min: {}", num_value, min);
                                 if num_value < *min {
                                     errors.push(ValidationError::TypeMismatch {
@@ -148,6 +172,25 @@ impl ValidationConfig {
                                     });
                                 }
                             }
+
+                            // 检查最大值
+                            if let Some(max) = max {
+                                debug!("num_value: {}, max: {}", num_value, max);
+                                if num_value > *max {
+                                    errors.push(ValidationError::TypeMismatch {
+                                        field: field.clone(),
+                                        expected: field_type.to_string(),
+                                        actual: value.to_string(),
+                                    });
+                                }
+                            }
+                        } else {
+                            debug!("as_number() returned None for value: {:?}", value);
+                            errors.push(ValidationError::TypeMismatch {
+                                field: field.clone(),
+                                expected: "number".to_string(),
+                                actual: format!("{:?}", value),
+                            });
                         }
                     }
                     FieldType::Boolean => {
