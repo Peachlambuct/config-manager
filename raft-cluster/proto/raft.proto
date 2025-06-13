@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package raft;
+
+// Raft核心服务
+service RaftService {
+  // 投票请求 - 用于Leader选举
+  rpc RequestVote(VoteRequest) returns (VoteResponse);
+  
+  // 日志追加 - 用于日志复制和心跳
+  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+}
+
+// 配置管理服务（扩展）
+service ConfigService {
+  // 提议配置变更
+  rpc ProposeConfig(ProposeConfigRequest) returns (ProposeConfigResponse);
+  
+  // 读取配置
+  rpc ReadConfig(ReadConfigRequest) returns (ReadConfigResponse);
+  
+  // 获取集群状态
+  rpc GetClusterState(GetClusterStateRequest) returns (GetClusterStateResponse);
+}
+
+// === 投票相关消息 ===
+message VoteRequest {
+  uint64 term = 1;                    // 候选人当前任期
+  string candidate_id = 2;            // 候选人ID
+  uint64 last_log_index = 3;          // 候选人最后日志条目索引
+  uint64 last_log_term = 4;           // 候选人最后日志条目任期
+}
+
+message VoteResponse {
+  uint64 term = 1;                    // 当前任期，候选人用来更新自己
+  bool vote_granted = 2;              // 是否投票给候选人
+  string voter_id = 3;                // 投票者ID
+}
+
+// === 日志追加相关消息 ===
+message AppendEntriesRequest {
+  uint64 term = 1;                    // Leader当前任期
+  string leader_id = 2;               // Leader ID
+  uint64 prev_log_index = 3;          // 新日志条目前一条的索引
+  uint64 prev_log_term = 4;           // 新日志条目前一条的任期
+  repeated LogEntry entries = 5;      // 要存储的日志条目(心跳时为空)
+  uint64 leader_commit = 6;           // Leader已提交的最高日志条目索引
+}
+
+message AppendEntriesResponse {
+  uint64 term = 1;                    // 当前任期
+  bool success = 2;                   // 如果跟随者包含匹配prev_log_index和prev_log_term的条目则为true
+  string follower_id = 3;             // 跟随者ID
+  uint64 conflict_index = 4;          // 冲突时的索引位置（用于快速回退）
+}
+
+// === 日志条目 ===
+message LogEntry {
+  uint64 term = 1;                    // 条目所属任期
+  uint64 index = 2;                   // 条目索引
+  bytes data = 3;                     // 序列化的配置操作数据
+  string entry_type = 4;              // 条目类型: "config_set", "config_delete", "noop"
+  string key = 5;                     // 配置键（用于配置操作）
+}
+
+// === 配置管理相关消息 ===
+message ProposeConfigRequest {
+  string key = 1;                     // 配置键
+  bytes value = 2;                    // 配置值（序列化的Config对象）
+  string operation = 3;               // 操作类型: "set", "delete", "update"
+  string client_id = 4;               // 客户端ID
+}
+
+message ProposeConfigResponse {
+  bool success = 1;                   // 是否成功
+  string message = 2;                 // 响应消息
+  string leader_id = 3;               // 当前Leader ID（如果不是Leader）
+}
+
+message ReadConfigRequest {
+  string key = 1;                     // 要读取的配置键
+  bool consistent_read = 2;           // 是否需要强一致性读取
+}
+
+message ReadConfigResponse {
+  bool success = 1;                   // 是否成功
+  bytes value = 2;                    // 配置值
+  string message = 3;                 // 响应消息
+  uint64 version = 4;                 // 配置版本
+}
+
+// === 集群状态相关消息 ===
+message GetClusterStateRequest {
+  // 空请求
+}
+
+message GetClusterStateResponse {
+  repeated NodeInfo nodes = 1;        // 集群节点信息
+  string leader_id = 2;               // 当前Leader
+  uint64 current_term = 3;            // 当前任期
+}
+
+message NodeInfo {
+  string node_id = 1;                 // 节点ID
+  string address = 2;                 // 节点地址
+  string role = 3;                    // 节点角色: "leader", "follower", "candidate"
+  bool is_healthy = 4;                // 节点是否健康
+  uint64 last_heartbeat = 5;          // 最后心跳时间戳
+} 
