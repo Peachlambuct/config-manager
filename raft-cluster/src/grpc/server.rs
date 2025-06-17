@@ -1,35 +1,32 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use tonic::{Request, Response, Status};
 use tracing::{info, warn, error};
 
 use crate::{
-    grpc::client::RaftClient,
     pb::{
         config_service_server::ConfigService, raft_service_server::RaftService,
         AppendEntriesRequest, AppendEntriesResponse, GetClusterStateRequest,
-        GetClusterStateResponse, ProposeConfigRequest, ProposeConfigResponse,
-        ReadConfigRequest, ReadConfigResponse, VoteRequest, VoteResponse,
+        GetClusterStateResponse, ProposeConfigRequest, ProposeConfigResponse, ReadConfigRequest,
+        ReadConfigResponse, VoteRequest, VoteResponse,
     },
-    raft::{engine::{RaftEngine, ClusterInfo}, node::NodeRole},
+    simple_raft::{RaftNode, ConfigRequest},
 };
 
-/// Raft服务实现
+/// Raft服务实现 (使用OpenRaft)
 pub struct RaftServiceImpl {
-    engine: Arc<Mutex<RaftEngine>>,
-    client: Arc<RaftClient>,
+    raft_node: Arc<RaftNode>,
 }
 
 impl RaftServiceImpl {
-    pub fn new(engine: Arc<Mutex<RaftEngine>>, client: Arc<RaftClient>) -> Self {
-        Self { engine, client }
+    pub fn new(raft_node: Arc<RaftNode>) -> Self {
+        Self { raft_node }
     }
 }
 
 #[tonic::async_trait]
 impl RaftService for RaftServiceImpl {
-    /// 处理投票请求 - 实现真正的Raft投票逻辑
+    /// 处理投票请求
     async fn request_vote(
         &self,
         request: Request<VoteRequest>,
@@ -41,18 +38,20 @@ impl RaftService for RaftServiceImpl {
             req.candidate_id, req.term, req.last_log_index, req.last_log_term
         );
 
-        // 使用RaftEngine的深度集成方法处理投票请求
-        let response = self.engine.lock().await.handle_vote_request(&req).await;
-
-        info!(
-            "🗳️  投票结果: candidate={}, granted={}, term={}",
-            req.candidate_id, response.vote_granted, response.term
-        );
+        // OpenRaft内部处理投票请求，这里返回基本响应
+        // 在实际的OpenRaft网络层实现中，这会被正确路由
+        warn!("🚧 投票请求暂时返回拒绝 - 需要实现OpenRaft网络层");
+        
+        let response = VoteResponse {
+            term: req.term,
+            vote_granted: false,
+            voter_id: self.raft_node.node_id.to_string(),
+        };
 
         Ok(Response::new(response))
     }
 
-    /// 处理日志追加请求 - 实现真正的Raft日志追加逻辑
+    /// 处理日志追加请求
     async fn append_entries(
         &self,
         request: Request<AppendEntriesRequest>,
@@ -64,28 +63,28 @@ impl RaftService for RaftServiceImpl {
             req.leader_id, req.term, req.prev_log_index, req.prev_log_term, req.entries.len()
         );
 
-        // 使用RaftEngine的深度集成方法处理AppendEntries请求
-        let response = self.engine.lock().await.handle_append_entries(&req).await;
-
-        let status_msg = if response.success { "成功" } else { "失败" };
-        info!(
-            "📝 AppendEntries处理{}: follower={}, term={}, conflict_index={}",
-            status_msg, response.follower_id, response.term, response.conflict_index
-        );
+        // OpenRaft内部处理日志追加，这里返回基本响应
+        warn!("🚧 日志追加请求暂时返回失败 - 需要实现OpenRaft网络层");
+        
+        let response = AppendEntriesResponse {
+            term: req.term,
+            success: false,
+            follower_id: self.raft_node.node_id.to_string(),
+            conflict_index: 0,
+        };
 
         Ok(Response::new(response))
     }
 }
 
-/// 配置服务实现
+/// 配置服务实现 (使用OpenRaft)
 pub struct ConfigServiceImpl {
-    engine: Arc<Mutex<RaftEngine>>,
-    client: Arc<RaftClient>,
+    raft_node: Arc<RaftNode>,
 }
 
 impl ConfigServiceImpl {
-    pub fn new(engine: Arc<Mutex<RaftEngine>>, client: Arc<RaftClient>) -> Self {
-        Self { engine, client }
+    pub fn new(raft_node: Arc<RaftNode>) -> Self {
+        Self { raft_node }
     }
 }
 
@@ -103,23 +102,50 @@ impl ConfigService for ConfigServiceImpl {
             req.key, req.operation
         );
 
-        let success = self
-            .engine
-            .lock()
-            .await
-            .propose_config(req.key, req.value)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        // 检查是否为Leader
+        if !self.raft_node.is_leader().await {
+            let metrics = self.raft_node.get_metrics().await;
+            
+            return Ok(Response::new(ProposeConfigResponse {
+                success: false,
+                message: "只有Leader可以处理写请求".to_string(),
+                leader_id: metrics.current_leader.map(|id| id.to_string()).unwrap_or_default(),
+            }));
+        }
 
-        let leader_id = self.engine.lock().await.get_leader_id().await.unwrap_or_default();
+        // 构造配置请求（简化版本只支持set操作）
+        if req.operation != "set" {
+            return Ok(Response::new(ProposeConfigResponse {
+                success: false,
+                message: format!("当前只支持set操作，不支持: {}", req.operation),
+                leader_id: self.raft_node.node_id.to_string(),
+            }));
+        }
 
-        let response = ProposeConfigResponse {
-            success,
-            message: if success { "配置提议成功".to_string() } else { "配置提议失败".to_string() },
-            leader_id,
+        let config_request = ConfigRequest {
+            key: req.key.clone(),
+            value: String::from_utf8_lossy(&req.value).to_string(),
         };
 
-        Ok(Response::new(response))
+        // 提交到Raft
+        match self.raft_node.client_write(config_request).await {
+            Ok(_response) => {
+                info!("✅ 配置提议成功: {}", req.key);
+                Ok(Response::new(ProposeConfigResponse {
+                    success: true,
+                    message: "配置提议成功".to_string(),
+                    leader_id: self.raft_node.node_id.to_string(),
+                }))
+            }
+            Err(e) => {
+                error!("❌ 配置提议失败: {}", e);
+                Ok(Response::new(ProposeConfigResponse {
+                    success: false,
+                    message: format!("配置提议失败: {}", e),
+                    leader_id: self.raft_node.node_id.to_string(),
+                }))
+            }
+        }
     }
 
     /// 读取配置
@@ -129,47 +155,56 @@ impl ConfigService for ConfigServiceImpl {
     ) -> Result<Response<ReadConfigResponse>, Status> {
         let req = request.into_inner();
 
-        info!("📖 收到配置读取请求: key={}, consistent_read={}", req.key, req.consistent_read);
+        info!(
+            "📖 收到配置读取请求: key={}, consistent_read={}",
+            req.key, req.consistent_read
+        );
 
         // 如果需要强一致性读取，检查是否是Leader
-        if req.consistent_read {
-            let role = self.engine.lock().await.get_role().await;
-            if role != NodeRole::Leader {
-                let leader_id = self.engine.lock().await.get_leader_id().await.unwrap_or_default();
-                return Ok(Response::new(ReadConfigResponse {
-                    success: false,
-                    value: vec![],
-                    message: format!("强一致性读取需要从Leader进行，当前Leader: {}", leader_id),
-                    version: 0,
-                }));
-            }
+        if req.consistent_read && !self.raft_node.is_leader().await {
+            let metrics = self.raft_node.get_metrics().await;
+            
+            return Ok(Response::new(ReadConfigResponse {
+                success: false,
+                value: vec![],
+                message: format!(
+                    "强一致性读取需要从Leader进行，当前Leader: {:?}", 
+                    metrics.current_leader
+                ),
+                version: 0,
+            }));
         }
 
         // 从状态机读取配置
-        let result = self.read_config_from_state_machine(&req.key).await;
-        
-        let response = match result {
-            Ok((value, version)) => {
-                info!("✅ 成功读取配置: key={}, version={}", req.key, version);
-                ReadConfigResponse {
+        match self.raft_node.client_read(&req.key).await {
+            Ok(Some(value)) => {
+                info!("✅ 成功读取配置: key={}", req.key);
+                Ok(Response::new(ReadConfigResponse {
                     success: true,
-                    value,
+                    value: value.into_bytes(),
                     message: "配置读取成功".to_string(),
-                    version,
-                }
+                    version: 1, // 简化版本号
+                }))
             }
-            Err(msg) => {
-                warn!("❌ 配置读取失败: key={}, error={}", req.key, msg);
-                ReadConfigResponse {
+            Ok(None) => {
+                info!("📖 配置不存在: {}", req.key);
+                Ok(Response::new(ReadConfigResponse {
                     success: false,
                     value: vec![],
-                    message: msg,
+                    message: format!("配置项不存在: {}", req.key),
                     version: 0,
-                }
+                }))
             }
-        };
-
-        Ok(Response::new(response))
+            Err(e) => {
+                error!("❌ 配置读取失败: key={}, error={}", req.key, e);
+                Ok(Response::new(ReadConfigResponse {
+                    success: false,
+                    value: vec![],
+                    message: format!("读取配置失败: {}", e),
+                    version: 0,
+                }))
+            }
+        }
     }
 
     /// 获取集群状态
@@ -179,41 +214,18 @@ impl ConfigService for ConfigServiceImpl {
     ) -> Result<Response<GetClusterStateResponse>, Status> {
         info!("🏥 收到集群状态查询请求");
 
-        // 获取集群状态信息
-        let cluster_state = self.collect_cluster_state().await;
-
-        let response = GetClusterStateResponse {
-            nodes: cluster_state.nodes,
-            leader_id: cluster_state.leader_id,
-            current_term: cluster_state.current_term,
-        };
-
-        info!(
-            "📊 返回集群状态: leader={}, term={}, nodes={}",
-            response.leader_id, response.current_term, response.nodes.len()
-        );
-
-        Ok(Response::new(response))
-    }
-}
-
-impl ConfigServiceImpl {
-    /// 从状态机读取配置
-    async fn read_config_from_state_machine(&self, key: &str) -> Result<(Vec<u8>, u64), String> {
-        // 使用RaftEngine的深度集成方法
-        self.engine.lock().await.read_config_from_state_machine(key).await
-    }
-
-    /// 收集集群状态信息
-    async fn collect_cluster_state(&self) -> ClusterStateInfo {
-        // 使用RaftEngine的深度集成方法获取集群信息
-        let cluster_info = self.engine.lock().await.get_cluster_info().await;
+        // 获取Raft指标
+        let metrics = self.raft_node.get_metrics().await;
         
-        // 构造当前节点信息
+        // 构造节点信息
         let current_node = crate::pb::NodeInfo {
-            node_id: cluster_info.node_id.clone(),
-            address: "localhost:50051".to_string(), // TODO: 从配置读取实际地址
-            role: role_to_string(cluster_info.role),
+            node_id: self.raft_node.node_id.to_string(),
+            address: "localhost:50051".to_string(), // TODO: 从配置获取实际地址
+            role: if self.raft_node.is_leader().await {
+                "leader".to_string()
+            } else {
+                "follower".to_string()
+            },
             is_healthy: true,
             last_heartbeat: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -221,43 +233,19 @@ impl ConfigServiceImpl {
                 .as_secs(),
         };
 
-        // TODO: 这里应该收集所有节点的信息
-        // 可以通过RaftClient查询其他节点状态
-        let mut nodes = vec![current_node];
-        
-        // 为其他peers创建基础节点信息
-        for peer in &cluster_info.peers {
-            if peer != &cluster_info.node_id {
-                nodes.push(crate::pb::NodeInfo {
-                    node_id: peer.clone(),
-                    address: format!("{}:50051", peer), // TODO: 从配置读取实际地址
-                    role: "unknown".to_string(), // TODO: 查询实际状态
-                    is_healthy: false, // TODO: 健康检查
-                    last_heartbeat: 0,
-                });
-            }
-        }
+        let response = GetClusterStateResponse {
+            nodes: vec![current_node],
+            leader_id: metrics.current_leader.map(|id| id.to_string()).unwrap_or_default(),
+            current_term: metrics.current_term,
+        };
 
-        ClusterStateInfo {
-            nodes,
-            leader_id: cluster_info.leader_id.unwrap_or_default(),
-            current_term: cluster_info.current_term,
-        }
-    }
-}
+        info!(
+            "📊 返回集群状态: leader={}, term={}, nodes={}",
+            response.leader_id,
+            response.current_term,
+            response.nodes.len()
+        );
 
-/// 集群状态信息
-struct ClusterStateInfo {
-    nodes: Vec<crate::pb::NodeInfo>,
-    leader_id: String,
-    current_term: u64,
-}
-
-/// 将NodeRole转换为字符串
-fn role_to_string(role: NodeRole) -> String {
-    match role {
-        NodeRole::Leader => "leader".to_string(),
-        NodeRole::Follower => "follower".to_string(),
-        NodeRole::Candidate => "candidate".to_string(),
+        Ok(Response::new(response))
     }
 }
