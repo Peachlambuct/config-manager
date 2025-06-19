@@ -13,6 +13,5 @@ test*
 .cursor
 /**/Cargo.toml
 /**/Cargo.lock
-*.log
 .idea
 docs

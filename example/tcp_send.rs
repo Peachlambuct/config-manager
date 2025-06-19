@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let mut input = String::new();
         print!("config-cli> ");
-        std::io::stdout().flush().unwrap();
+        std::io::stdout().flush()?;
 
         // 读取用户输入
         match std::io::stdin().read_line(&mut input) {
@@ -52,58 +52,20 @@ async fn main() -> anyhow::Result<()> {
                     println!("🔄 开始监听配置文件变化...");
                     loop {
                         println!("⏳ 等待服务器推送...");
-                        let mut response = String::new();
-                        match reader.read_line(&mut response).await {
-                            Ok(0) => {
-                                println!("🔌 服务器关闭了连接");
-                                break;
-                            }
-                            Ok(_) => {
-                                let response = response.trim();
-                                let response_bytes_len = response.parse::<usize>().unwrap();
-                                let mut buffer = vec![0; response_bytes_len];
-                                reader.read_exact(&mut buffer).await?;
-                                let response = String::from_utf8(buffer).unwrap();
-                                if response.starts_with("无效的命令") {
-                                    println!("⚠️  {}", response);
-                                    println!("💡 输入 'help' 查看可用命令");
-                                } else {
-                                    println!("✅ {}", response);
-                                }
-                            }
-                            Err(e) => {
-                                println!("❌ 读取响应时出错: {}", e);
-                                break;
-                            }
+                        let response = String::new();
+                        if let Err(e) = reader_read_byte(&mut reader, response).await {
+                            println!("<UNK> <UNK>: {}", e);
+                            break;
                         }
                     }
                     continue;
                 }
 
                 // 读取服务器响应
-                let mut response = String::new();
-                match reader.read_line(&mut response).await {
-                    Ok(0) => {
-                        println!("🔌 服务器关闭了连接");
-                        break;
-                    }
-                    Ok(_) => {
-                        let response = response.trim();
-                        let response_bytes_len = response.parse::<usize>().unwrap();
-                        let mut buffer = vec![0; response_bytes_len];
-                        reader.read_exact(&mut buffer).await?;
-                        let response = String::from_utf8(buffer).unwrap();
-                        if response.starts_with("无效的命令") {
-                            println!("⚠️  {}", response);
-                            println!("💡 输入 'help' 查看可用命令");
-                        } else {
-                            println!("✅ {}", response);
-                        }
-                    }
-                    Err(e) => {
-                        println!("❌ 读取响应时出错: {}", e);
-                        break;
-                    }
+                let response = String::new();
+                if let Err(e) = reader_read_byte(&mut reader, response).await {
+                    println!("<UNK> <UNK>: {}", e);
+                    break;
                 }
             }
             Err(e) => {
@@ -114,4 +76,32 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn reader_read_byte(reader: &mut BufReader<TcpStream>, response: String) -> std::io::Result<usize> {
+    let mut response = response;
+    match reader.read_line(&mut response).await {
+        Ok(0) => {
+            println!("🔌 服务器关闭了连接");
+            Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, ""))
+        }
+        Ok(_) => {
+            let response = response.trim();
+            let response_bytes_len = response.parse::<usize>().unwrap();
+            let mut buffer = vec![0; response_bytes_len];
+            reader.read_exact(&mut buffer).await?;
+            let response = String::from_utf8(buffer).unwrap();
+            if response.starts_with("无效的命令") {
+                println!("⚠️  {}", response);
+                println!("💡 输入 'help' 查看可用命令");
+            } else {
+                println!("✅ {}", response);
+            }
+            Ok(response_bytes_len)
+        }
+        Err(e) => {
+            println!("❌ 读取响应时出错: {}", e);
+            Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, ""))
+        }
+    }
 }
